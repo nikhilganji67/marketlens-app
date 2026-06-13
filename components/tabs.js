@@ -504,6 +504,7 @@ export function Portfolio() {
         return;
       }
       setHoldings(parsed);
+      localStorage.setItem('ml_holdings', JSON.stringify(parsed));
       setPortInsight('');
     };
     reader.readAsText(file);
@@ -577,7 +578,7 @@ export function Portfolio() {
           <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: '#1a9e5c', fontWeight: 500 }}>✅ {holdings.length} holdings loaded from your CSV</span>
             <button
-              onClick={() => { setHoldings(null); setFileName(''); setPortInsight(''); }}
+              onClick={() => { setHoldings(null); localStorage.removeItem('ml_holdings'); setFileName(''); setPortInsight(''); }}
               style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer' }}
             >
               Clear · use demo data
