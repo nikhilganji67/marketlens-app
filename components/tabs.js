@@ -450,13 +450,64 @@ export function MidcapGems({ onSearch }) {
 }
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
+function parseZerodhaCSV(text) {
+  const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+
+  // Map common Zerodha column names
+  const col = (row, ...names) => {
+    for (const name of names) {
+      const idx = header.findIndex(h => h.includes(name));
+      if (idx !== -1) return row[idx]?.replace(/"/g, '').trim() || '';
+    }
+    return '';
+  };
+
+  return lines.slice(1).map(line => {
+    const row = line.split(',');
+    const stock = col(row, 'instrument', 'symbol', 'stock', 'tradingsymbol');
+    const qty = parseFloat(col(row, 'quantity', 'qty')) || 0;
+    const avg = parseFloat(col(row, 'avg', 'average')) || 0;
+    const ltp = parseFloat(col(row, 'ltp', 'last price', 'current')) || avg;
+    const pnl = parseFloat(col(row, 'p&l', 'pnl', 'unrealised')) || (ltp - avg) * qty;
+    if (!stock || qty === 0) return null;
+    return { stock, qty, avg: Math.round(avg * 100) / 100, ltp: Math.round(ltp * 100) / 100, pnl: Math.round(pnl), signal: 'HOLD', alert: 'Upload complete — AI analysis pending.' };
+  }).filter(Boolean);
+}
+
 export function Portfolio() {
+  const [holdings, setHoldings] = useState(null); // null = show demo
   const [portInsight, setPortInsight] = useState('');
   const [portLoading, setPortLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [fileName, setFileName] = useState('');
 
-  const total = PORTFOLIO.reduce((a, p) => a + p.qty * p.ltp, 0);
-  const cost = PORTFOLIO.reduce((a, p) => a + p.qty * p.avg, 0);
+  const data = holdings || PORTFOLIO;
+  const total = data.reduce((a, p) => a + p.qty * p.ltp, 0);
+  const cost = data.reduce((a, p) => a + p.qty * p.avg, 0);
   const pnl = total - cost;
+
+  const handleFile = (file) => {
+    setUploadError('');
+    if (!file || !file.name.endsWith('.csv')) {
+      setUploadError('Please upload a .csv file from Zerodha Console.');
+      return;
+    }
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const parsed = parseZerodhaCSV(e.target.result);
+      if (parsed.length === 0) {
+        setUploadError('Could not parse the CSV. Make sure it is the Holdings export from Zerodha Console.');
+        return;
+      }
+      setHoldings(parsed);
+      setPortInsight('');
+    };
+    reader.readAsText(file);
+  };
 
   const getInsight = async () => {
     setPortLoading(true);
@@ -466,11 +517,11 @@ export function Portfolio() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: 'Analyze this Zerodha portfolio and give actionable insights. Cross-reference each holding with: current sector signal, FII flow, earnings result, PE vs sector avg. Which positions to add to, which to exit, and what is missing from my portfolio? Be specific with ₹ targets.',
-          context: JSON.stringify({ holdings: PORTFOLIO, sectors: SECTORS, earnings: EARNINGS, fii: FII_TODAY, news: NEWS }),
+          context: JSON.stringify({ holdings: data, sectors: SECTORS, earnings: EARNINGS, fii: FII_TODAY, news: NEWS }),
         }),
       });
-      const data = await res.json();
-      setPortInsight(data.text || data.error || 'No response');
+      const d = await res.json();
+      setPortInsight(d.text || d.error || 'No response');
     } catch (e) {
       setPortInsight('Could not load analysis.');
     }
@@ -479,6 +530,68 @@ export function Portfolio() {
 
   return (
     <div>
+      {/* Upload card */}
+      <Card style={{ marginBottom: 14 }}>
+        <CardTitle icon="📂">Import Zerodha holdings</CardTitle>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+          Export from <strong>Zerodha Console</strong> → Portfolio → Holdings → Download CSV, then upload below.
+        </div>
+
+        {/* Drop zone */}
+        <div
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+          style={{
+            border: `2px dashed ${dragOver ? '#1a6fc4' : '#d1d5db'}`,
+            borderRadius: 10,
+            padding: '24px 16px',
+            textAlign: 'center',
+            background: dragOver ? '#f0f7ff' : '#f9fafb',
+            transition: 'all 0.15s',
+            cursor: 'pointer',
+          }}
+          onClick={() => document.getElementById('csv-input').click()}
+        >
+          <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>
+            {fileName ? `✅ ${fileName} uploaded` : 'Drop your Zerodha CSV here or click to browse'}
+          </div>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Supports Zerodha Console holdings export (.csv)</div>
+          <input
+            id="csv-input"
+            type="file"
+            accept=".csv"
+            style={{ display: 'none' }}
+            onChange={e => handleFile(e.target.files[0])}
+          />
+        </div>
+
+        {uploadError && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#d94040', background: '#fce8e8', padding: '8px 12px', borderRadius: 8 }}>
+            ⚠ {uploadError}
+          </div>
+        )}
+
+        {holdings && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: '#1a9e5c', fontWeight: 500 }}>✅ {holdings.length} holdings loaded from your CSV</span>
+            <button
+              onClick={() => { setHoldings(null); setFileName(''); setPortInsight(''); }}
+              style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer' }}
+            >
+              Clear · use demo data
+            </button>
+          </div>
+        )}
+
+        {!holdings && (
+          <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>
+            Currently showing demo portfolio. Upload your CSV to see real holdings.
+          </div>
+        )}
+      </Card>
+
       <Row cols={3}>
         <MetricCard label="Portfolio value" value={`₹${(total / 100000).toFixed(1)}L`} />
         <MetricCard label="Unrealised P&L" value={`${pnl >= 0 ? '+' : ''}₹${Math.abs(pnl / 1000).toFixed(0)}k`} color={pnl >= 0 ? C.buy : C.sell} />
@@ -491,13 +604,13 @@ export function Portfolio() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: '0.5px solid #e5e7eb' }}>
-                {['Stock', 'Qty', 'Avg cost', 'LTP', 'P&L', 'Signal', 'AI alert'].map(h => (
+                {['Stock', 'Qty', 'Avg cost', 'LTP', 'P&L', 'Signal', 'Note'].map(h => (
                   <th key={h} style={{ textAlign: 'left', padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#6b7280' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {PORTFOLIO.map((p, i) => {
+              {data.map((p, i) => {
                 const pl = (p.ltp - p.avg) * p.qty;
                 return (
                   <tr key={i} style={{ borderBottom: '0.5px solid #f9fafb' }}>
@@ -536,15 +649,10 @@ export function Portfolio() {
             dangerouslySetInnerHTML={{ __html: portInsight.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }}
           />
         ) : !portLoading && (
-          <AIInsight
-            prompt="Analyze this Zerodha portfolio and give actionable insights. Cross-reference each holding with current sector signal, FII flow, earnings result, PE vs sector avg. Which positions to add to, which to exit, and what is missing from my portfolio?"
-            context={{ holdings: PORTFOLIO, sectors: SECTORS, earnings: EARNINGS }}
-            title="portfolio"
-          />
+          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+            Click &quot;Get AI analysis&quot; above to analyze your portfolio.
+          </div>
         )}
-        <div style={{ marginTop: 12, padding: '8px 12px', background: '#f0f7ff', borderRadius: 8, fontSize: 11, color: '#6b7280' }}>
-          📂 <strong>Zerodha import:</strong> Export your holdings CSV from Zerodha Console → Portfolio → Holdings → Download. Upload here for auto-sync. Currently showing demo portfolio.
-        </div>
       </Card>
     </div>
   );
