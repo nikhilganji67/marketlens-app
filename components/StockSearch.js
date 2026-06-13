@@ -15,7 +15,7 @@ export default function StockSearch({ query, onClose }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt: `Give me a complete investment analysis for "${query}". Cover: 1) What sector it belongs to and how that sector is doing right now 2) FII/DII positioning if known 3) Recent earnings — did they beat/miss guidance? 4) PE and PEG vs sector avg 5) Buy/Hold/Sell signal with reasoning 6) Key risks 7) If it's a midcap (₹2500–7000cr), highlight any turnaround thesis. 8) Related news and what it means. Be specific and data-driven.`,
+        prompt: `Give me a complete investment analysis for "${query}". Cover: 1) Sector and how it is doing right now 2) FII/DII positioning 3) Recent earnings — beat/miss/guidance update 4) PE and PEG vs sector avg 5) ROE, ROCE and PAT growth trend 6) Management quality — promoter background, track record, key executives, any red flags (pledging, salary, related party) 7) Buy/Hold/Sell signal with price targets 8) Key risks 9) If midcap (Rs2500-7000cr), highlight turnaround thesis and what institutions are watching. Be specific and data-driven.`,
         context,
       }),
     })

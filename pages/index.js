@@ -29,7 +29,7 @@ export default function Home() {
       case 'flows': return <Flows />;
       case 'signals': return <Signals />;
       case 'earnings': return <Earnings />;
-      case 'global': return <Global />;
+      case 'global': return <Global onSearch={doSearch} />;
       case 'midcap': return <MidcapGems onSearch={doSearch} />;
       case 'portfolio': return <Portfolio onSearch={doSearch} />;
       case 'news': return <NewsTab onSearch={doSearch} />;

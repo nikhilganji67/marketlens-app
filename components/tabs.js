@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Badge, Pct, Card, CardTitle, MetricCard, Row, TR, AIInsight, Divider, C } from './ui';
-import { MARKET, SECTORS, FII_TODAY, BULK_DEALS, EARNINGS, MIDCAP, EM_MARKETS, PORTFOLIO, NEWS } from '../lib/data';
+import { MARKET, SECTORS, FII_TODAY, BULK_DEALS, EARNINGS, MIDCAP, EM_MARKETS, PORTFOLIO, NEWS, DATA_UPDATED } from '../lib/data';
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 export function Overview({ onSearch }) {
@@ -338,32 +338,84 @@ export function Earnings() {
 }
 
 // ── Global & EM ───────────────────────────────────────────────────────────────
-export function Global() {
+export function Global({ onSearch }) {
+  const [selectedEM, setSelectedEM] = useState(null);
+  const [emInsight, setEmInsight] = useState('');
+  const [emLoading, setEmLoading] = useState(false);
+
+  const openEM = async (m) => {
+    setSelectedEM(m);
+    setEmInsight('');
+    setEmLoading(true);
+    try {
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Give me a detailed investment opportunity analysis for ' + m.country + ' (' + m.name + '). Cover: 1) Why the market is at current levels 2) Macro drivers (currency, rates, commodities) 3) Key sectors to play 4) How an Indian investor can get exposure (ETFs, ADRs, direct) 5) Risk factors 6) 12-month return outlook vs Nifty 7) Comparison with India on PE and growth.',
+          context: JSON.stringify({ market: m, indiaContext: { nifty: 24762, niftyPE: 22, fiiFlows: 'positive' } }),
+        }),
+      });
+      const d = await res.json();
+      setEmInsight(d.text || 'No response');
+    } catch { setEmInsight('Could not load analysis.'); }
+    setEmLoading(false);
+  };
+
+  const flagEmoji = { BR: '🇧🇷', VN: '🇻🇳', ID: '🇮🇩', KR: '🇰🇷', MX: '🇲🇽', CN: '🇨🇳', TH: '🇹🇭', PH: '🇵🇭' };
+
   return (
     <div>
+      {selectedEM && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setSelectedEM(null)}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 24, maxWidth: 640, width: '100%', maxHeight: '80vh', overflow: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{flagEmoji[selectedEM.flag]} {selectedEM.name}</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>PE {selectedEM.pe}x · YTD USD return {selectedEM.usd > 0 ? '+' : ''}{selectedEM.usd}% · {selectedEM.signal}</div>
+              </div>
+              <button onClick={() => setSelectedEM(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', fontSize: 16, color: '#6b7280' }}>x</button>
+            </div>
+            <div style={{ padding: '8px 12px', background: '#f0f7ff', borderRadius: 8, fontSize: 12, color: '#374151', marginBottom: 12 }}>{selectedEM.note}</div>
+            {emLoading
+              ? <div style={{ fontSize: 13, color: '#6b7280', fontStyle: 'italic', padding: '16px 0' }}>Analyzing {selectedEM.country} market opportunity...</div>
+              : <div style={{ fontSize: 13, color: '#1f2937', lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: emInsight.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }} />
+            }
+          </div>
+        </div>
+      )}
+
       <Row cols={2}>
         <Card>
-          <CardTitle icon="🌍">Emerging market signals</CardTitle>
+          <CardTitle icon="🌍">Emerging market signals · click for deep dive</CardTitle>
           {EM_MARKETS.map(m => (
-            <div key={m.name} style={{ padding: '7px 0', borderBottom: '0.5px solid #f9fafb' }}>
+            <div key={m.name}
+              onClick={() => openEM(m)}
+              style={{ padding: '8px 10px', borderBottom: '0.5px solid #f9fafb', cursor: 'pointer', borderRadius: 6, transition: 'background 0.1s' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                <span style={{ fontWeight: 500, fontSize: 13 }}>{m.flag} {m.name}</span>
+                <span style={{ fontWeight: 500, fontSize: 13, color: '#1a6fc4' }}>{flagEmoji[m.flag]} {m.name}</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Pct val={m.chg} />
                   <Badge type={m.signal} />
+                  <span style={{ fontSize: 11, color: '#9ca3af' }}>PE {m.pe}x</span>
                 </span>
               </div>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>{m.note}</span>
+              <span style={{ fontSize: 12, color: '#6b7280' }}>{m.note.substring(0, 80)}...</span>
             </div>
           ))}
         </Card>
         <Card>
-          <CardTitle icon="📡">DXY & macro signals</CardTitle>
+          <CardTitle icon="📡">DXY and macro signals</CardTitle>
           {[
-            { label: 'US Dollar Index (DXY)', val: '103.4', note: '↓ Weak dollar = EM positive' },
-            { label: 'US 10Y yield', val: '4.28%', note: 'Stable — no EM outflow risk' },
-            { label: 'Brent Crude', val: '$82.4/bbl', note: 'Elevated — India import watch' },
-            { label: 'Gold', val: '$2,341', note: 'Safe haven bid — mild risk-off' },
+            { label: 'US Dollar Index (DXY)', val: '103.4', note: 'Weak dollar = EM positive' },
+            { label: 'US 10Y yield', val: '4.28%', note: 'Stable, no EM outflow risk' },
+            { label: 'Brent Crude', val: '$82.4/bbl', note: 'Elevated, India import watch' },
+            { label: 'Gold', val: '$2,341', note: 'Safe haven bid, mild risk-off' },
             { label: 'USD/INR', val: '83.6', note: 'Stable range, RBI managing' },
             { label: 'FII EM flows (global)', val: '+$4.2B MTD', note: 'Risk-on rotation active' },
           ].map(r => (
@@ -380,7 +432,7 @@ export function Global() {
       <Card>
         <CardTitle icon="✦">AI global opportunity scan</CardTitle>
         <AIInsight
-          prompt="Scan global and emerging markets for: 1) Which EM countries have bottomed and offer 12–24 month return opportunity? 2) How does India compare on valuation vs Brazil, Vietnam, Korea? 3) What macro signals (DXY, yields, crude) affect India specifically right now? 4) Is this a good time to be overweight India vs other EMs?"
+          prompt="Scan global and emerging markets for: 1) Which EM countries have bottomed and offer 12-24 month return opportunity? 2) How does India compare on valuation vs Brazil, Vietnam, Korea? 3) What macro signals (DXY, yields, crude) affect India specifically right now? 4) Is this a good time to be overweight India vs other EMs? Give a definitive allocation view."
           context={{ em: EM_MARKETS, macro: { dxy: 103.4, us10y: 4.28, crude: 82.4, usdInr: 83.6 } }}
           title="global EM opportunity"
         />
@@ -389,65 +441,90 @@ export function Global() {
   );
 }
 
+
 // ── Midcap Gems ───────────────────────────────────────────────────────────────
 export function MidcapGems({ onSearch }) {
+  const [filter, setFilter] = useState('all');
+  const filtered = filter === 'quality'
+    ? MIDCAP.filter(m => m.quality)
+    : filter === 'turnaround'
+    ? MIDCAP.filter(m => m.signal === 'TURNAROUND' || m.signal === 'BOTTOM')
+    : MIDCAP;
+
   return (
     <div>
       <Card highlight>
-        <CardTitle icon="💎"><span style={{ color: '#1a6fc4' }}>Midcap gems · ₹2,500–7,000 cr market cap</span></CardTitle>
+        <CardTitle icon="💎"><span style={{ color: '#1a6fc4' }}>Midcap gems · Rs2,500-7,000 cr market cap</span></CardTitle>
         <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-          Turnaround stories, sector bottom plays, and under-radar compounders. Click any row for full AI analysis.
+          25 curated stocks across quality compounders and turnaround plays. Click any row for full AI analysis including management profile.
         </div>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          {[
+            { key: 'all', label: 'All stocks (' + MIDCAP.length + ')' },
+            { key: 'quality', label: 'Quality filter: ROE+ROCE>20%, PAT CAGR>20% (' + MIDCAP.filter(m=>m.quality).length + ')' },
+            { key: 'turnaround', label: 'Turnarounds (' + MIDCAP.filter(m=>m.signal==='TURNAROUND'||m.signal==='BOTTOM').length + ')' },
+          ].map(f => (
+            <button key={f.key} onClick={() => setFilter(f.key)} style={{ fontSize: 12, padding: '5px 12px', borderRadius: 99, border: '0.5px solid ' + (filter === f.key ? '#1a6fc4' : '#d1d5db'), background: filter === f.key ? '#e8f1fc' : 'white', color: filter === f.key ? '#1a6fc4' : '#6b7280', cursor: 'pointer', fontWeight: filter === f.key ? 600 : 400 }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {filter === 'quality' && (
+          <div style={{ padding: '8px 12px', background: '#e6f7ef', borderRadius: 8, fontSize: 12, color: '#0e6b3d', marginBottom: 10 }}>
+            Showing stocks with ROE and ROCE both above 20% AND PAT CAGR above 20% over last 5 years — the quality compounder filter used by major institutions.
+          </div>
+        )}
+
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '0.5px solid #e5e7eb' }}>
-                {['Company', 'Mcap (cr)', 'Sector', 'PE', 'PEG', 'Signal', 'FII stance', 'Thesis'].map(h => (
-                  <th key={h} style={{ textAlign: 'left', padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#6b7280' }}>{h}</th>
+                {['Company', 'Mcap', 'Sector', 'PE', 'PEG', 'ROE', 'ROCE', 'PAT CAGR 5yr', 'Signal', 'FII', 'Thesis'].map(h => (
+                  <th key={h} style={{ textAlign: 'left', padding: '6px 8px', fontSize: 10, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {MIDCAP.map(m => (
+              {filtered.map(m => (
                 <tr key={m.name}
-                  style={{ borderBottom: '0.5px solid #f9fafb', cursor: 'pointer' }}
+                  style={{ borderBottom: '0.5px solid #f9fafb', cursor: 'pointer', background: m.quality ? '#fafffe' : 'white' }}
                   onClick={() => onSearch(m.name)}
                 >
-                  <td style={{ padding: '8px 10px', fontWeight: 500, color: '#1a6fc4' }}>{m.name}</td>
-                  <td style={{ padding: '8px 10px' }}>₹{m.mcap.toLocaleString()}</td>
-                  <td style={{ padding: '8px 10px', fontSize: 12, color: '#6b7280' }}>{m.sector}</td>
-                  <td style={{ padding: '8px 10px' }}>{m.pe}x</td>
-                  <td style={{ padding: '8px 10px', color: m.peg < 1 ? C.buy : C.hold, fontWeight: 500 }}>{m.peg}</td>
-                  <td style={{ padding: '8px 10px' }}><Badge type={m.signal} /></td>
-                  <td style={{ padding: '8px 10px', fontSize: 12 }}>{m.fii}</td>
-                  <td style={{ padding: '8px 10px', fontSize: 12, color: '#6b7280' }}>{m.note}</td>
+                  <td style={{ padding: '7px 8px', fontWeight: 500, color: '#1a6fc4' }}>{m.name}</td>
+                  <td style={{ padding: '7px 8px', whiteSpace: 'nowrap' }}>Rs{m.mcap.toLocaleString()}</td>
+                  <td style={{ padding: '7px 8px', fontSize: 11, color: '#6b7280' }}>{m.sector}</td>
+                  <td style={{ padding: '7px 8px' }}>{m.pe}x</td>
+                  <td style={{ padding: '7px 8px', color: m.peg < 1 ? '#1a9e5c' : '#c07a10', fontWeight: 500 }}>{m.peg}</td>
+                  <td style={{ padding: '7px 8px', color: m.roe >= 20 ? '#1a9e5c' : '#c07a10', fontWeight: 500 }}>{m.roe}%</td>
+                  <td style={{ padding: '7px 8px', color: m.roce >= 20 ? '#1a9e5c' : '#c07a10', fontWeight: 500 }}>{m.roce}%</td>
+                  <td style={{ padding: '7px 8px', color: m.patCagr >= 20 ? '#1a9e5c' : '#c07a10', fontWeight: 500 }}>{m.patCagr}%</td>
+                  <td style={{ padding: '7px 8px' }}><Badge type={m.signal} /></td>
+                  <td style={{ padding: '7px 8px', fontSize: 11 }}>{m.fii}</td>
+                  <td style={{ padding: '7px 8px', fontSize: 11, color: '#6b7280', maxWidth: 160 }}>{m.note}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </Card>
-
-      <Card>
-        <CardTitle icon="🔍">Turnaround filters</CardTitle>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {['PE below sector avg', 'PEG < 1', 'FII accumulating', 'Promoter buying', 'Guidance raised', '52w low to breakout', 'Sector tailwind', 'Strong order book', 'Margin expansion'].map(t => (
-            <span key={t} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 99, border: '0.5px solid #d1d5db', color: '#374151', background: '#f9fafb' }}>{t}</span>
-          ))}
+        <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>
+          Click any row for full AI analysis including management profile, promoter holding, and institutional interest.
         </div>
       </Card>
 
       <Card>
-        <CardTitle icon="✦">AI midcap turnaround picks</CardTitle>
+        <CardTitle icon="✦">AI midcap quality compounder analysis</CardTitle>
         <AIInsight
-          prompt="Analyze the midcap segment (₹2500–7000 crore) for turnaround stories and hidden compounders in India. Which sectors within this range are bottoming? What do institutions look for in small/midcap turnarounds? Give a framework for picking midcap turnarounds and highlight the most compelling candidates — consider promoter buying, FII entry, order book recovery, and margin expansion."
-          context={MIDCAP}
-          title="midcap turnarounds"
+          prompt="Analyze the midcap segment (Rs2500-7000 crore) focusing on quality compounders with ROE and ROCE above 20% and PAT CAGR above 20% for 5 years. Which of these stocks are currently at attractive valuations (PEG below 1)? What sectors within midcap are showing the strongest quality + value combination? Give a framework and top 5 picks with reasoning."
+          context={MIDCAP.filter(m => m.quality)}
+          title="quality midcap compounders"
         />
       </Card>
     </div>
   );
 }
+
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
 function parseZerodhaCSV(text) {
@@ -496,6 +573,7 @@ export function Portfolio({ onSearch }) {
       return typeof window !== 'undefined' ? localStorage.getItem('ml_holdings_name') || '' : '';
     } catch { return ''; }
   });
+  const [showUpload, setShowUpload] = useState(false);
   const [portInsight, setPortInsight] = useState('');
   const [portLoading, setPortLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -521,6 +599,7 @@ export function Portfolio({ onSearch }) {
       }
       setHoldings(parsed);
       setSavedFileName(file.name);
+      setShowUpload(false);
       setPortInsight('');
       try {
         localStorage.setItem('ml_holdings', JSON.stringify(parsed));
@@ -534,6 +613,7 @@ export function Portfolio({ onSearch }) {
     setHoldings(null);
     setSavedFileName('');
     setPortInsight('');
+    setShowUpload(false);
     try {
       localStorage.removeItem('ml_holdings');
       localStorage.removeItem('ml_holdings_name');
@@ -547,62 +627,86 @@ export function Portfolio({ onSearch }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: 'Analyze this Zerodha portfolio and give actionable insights. Cross-reference each holding with: current sector signal, FII flow, earnings result, PE vs sector avg. Which positions to add to, which to exit, and what is missing from my portfolio? Be specific with rupee targets.',
+          prompt: 'Analyze this Zerodha portfolio and give actionable insights. Cross-reference each holding with: current sector signal, FII flow, earnings result, PE vs sector avg. Which positions to add to, which to exit, and what is missing? Be specific with rupee targets.',
           context: JSON.stringify({ holdings: data, sectors: SECTORS, earnings: EARNINGS, fii: FII_TODAY, news: NEWS }),
         }),
       });
       const d = await res.json();
       setPortInsight(d.text || d.error || 'No response');
-    } catch (e) {
-      setPortInsight('Could not load analysis.');
-    }
+    } catch { setPortInsight('Could not load analysis.'); }
     setPortLoading(false);
   };
+
+  const UploadZone = () => (
+    <div>
+      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+        Export from Zerodha Console &rarr; Portfolio &rarr; Holdings &rarr; Download CSV
+      </div>
+      <div
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+        onClick={() => document.getElementById('csv-input').click()}
+        style={{ border: '2px dashed ' + (dragOver ? '#1a6fc4' : '#d1d5db'), borderRadius: 10, padding: '20px 16px', textAlign: 'center', background: dragOver ? '#f0f7ff' : '#f9fafb', cursor: 'pointer' }}
+      >
+        <div style={{ fontSize: 24, marginBottom: 6 }}>📄</div>
+        <div style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>Drop your Zerodha CSV here or click to browse</div>
+        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>Saved automatically in browser - no re-uploading after first time</div>
+        <input id="csv-input" type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+      </div>
+      {uploadError && <div style={{ marginTop: 8, fontSize: 12, color: '#d94040', background: '#fce8e8', padding: '8px 12px', borderRadius: 8 }}>{'Warning: ' + uploadError}</div>}
+      {holdings && (
+        <button onClick={() => setShowUpload(false)} style={{ marginTop: 8, fontSize: 12, padding: '5px 12px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer' }}>
+          Cancel
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div>
       <Card style={{ marginBottom: 14 }}>
-        <CardTitle icon="📂">Zerodha holdings</CardTitle>
-        {holdings ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#e6f7ef', borderRadius: 8 }}>
-            <span style={{ fontSize: 13, color: '#0e6b3d', fontWeight: 500 }}>
-              {'✅ ' + (savedFileName || 'Holdings') + ' · ' + holdings.length + ' stocks loaded · auto-saved'}
-            </span>
-            <button onClick={clearHoldings} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer' }}>
-              Clear
-            </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <CardTitle icon="📂">Zerodha holdings</CardTitle>
+          {holdings && !showUpload && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setShowUpload(true)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #1a6fc4', background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer' }}>
+                Update holdings
+              </button>
+              <button onClick={clearHoldings} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#d94040', cursor: 'pointer' }}>
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+
+        {holdings && !showUpload ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: '#e6f7ef', borderRadius: 8 }}>
+            <span style={{ fontSize: 18 }}>✅</span>
+            <div>
+              <div style={{ fontSize: 13, color: '#0e6b3d', fontWeight: 500 }}>{savedFileName || 'Holdings'} · {holdings.length} stocks loaded</div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Auto-saved in browser · Switch tabs freely, data persists · Click "Update holdings" to refresh</div>
+            </div>
           </div>
         ) : (
-          <div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
-              Export from Zerodha Console &rarr; Portfolio &rarr; Holdings &rarr; Download CSV
-            </div>
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
-              onClick={() => document.getElementById('csv-input').click()}
-              style={{ border: '2px dashed #d1d5db', borderRadius: 10, padding: '20px 16px', textAlign: 'center', background: '#f9fafb', cursor: 'pointer' }}
-            >
-              <div style={{ fontSize: 24, marginBottom: 6 }}>📄</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>Drop your Zerodha CSV here or click to browse</div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>Saved automatically — no re-uploading needed next time</div>
-              <input id="csv-input" type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
-            </div>
-            {uploadError && <div style={{ marginTop: 8, fontSize: 12, color: '#d94040', background: '#fce8e8', padding: '8px 12px', borderRadius: 8 }}>{'⚠ ' + uploadError}</div>}
-            <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>Showing demo portfolio. Upload your CSV to see real holdings.</div>
-          </div>
+          <UploadZone />
+        )}
+
+        {showUpload && <UploadZone />}
+
+        {!holdings && !showUpload && (
+          <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>Showing demo portfolio. Upload your CSV to see real holdings.</div>
         )}
       </Card>
 
       <Row cols={3}>
-        <MetricCard label="Portfolio value" value={'₹' + (total / 100000).toFixed(1) + 'L'} />
-        <MetricCard label="Unrealised P&L" value={(pnl >= 0 ? '+' : '') + '₹' + Math.abs(pnl / 1000).toFixed(0) + 'k'} color={pnl >= 0 ? C.buy : C.sell} />
+        <MetricCard label="Portfolio value" value={'Rs' + (total / 100000).toFixed(1) + 'L'} />
+        <MetricCard label="Unrealised P&L" value={(pnl >= 0 ? '+' : '') + 'Rs' + Math.abs(pnl / 1000).toFixed(0) + 'k'} color={pnl >= 0 ? C.buy : C.sell} />
         <MetricCard label="Return %" value={(pnl >= 0 ? '+' : '') + ((pnl / cost) * 100).toFixed(1) + '%'} color={pnl >= 0 ? C.buy : C.sell} />
       </Row>
 
       <Card>
-        <CardTitle icon="💼">Holdings · news · flags</CardTitle>
+        <CardTitle icon="💼">Holdings · news · flags · click stock for AI analysis</CardTitle>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -620,28 +724,21 @@ export function Portfolio({ onSearch }) {
                 return (
                   <tr key={i} style={{ borderBottom: '0.5px solid #f9fafb', background: flag && flag.type === 'MISS' ? '#fff9f9' : 'white' }}>
                     <td style={{ padding: '8px 10px' }}>
-                      <span
-                        onClick={() => onSearch && onSearch(p.stock)}
-                        style={{ fontWeight: 600, color: '#1a6fc4', cursor: 'pointer', textDecoration: 'underline' }}
-                      >
+                      <span onClick={() => onSearch && onSearch(p.stock)} style={{ fontWeight: 600, color: '#1a6fc4', cursor: 'pointer', textDecoration: 'underline' }}>
                         {p.stock}
                       </span>
                     </td>
                     <td style={{ padding: '8px 10px' }}>{p.qty}</td>
-                    <td style={{ padding: '8px 10px', color: '#6b7280' }}>{'₹' + p.avg}</td>
-                    <td style={{ padding: '8px 10px' }}>{'₹' + p.ltp}</td>
+                    <td style={{ padding: '8px 10px', color: '#6b7280' }}>Rs{p.avg}</td>
+                    <td style={{ padding: '8px 10px' }}>Rs{p.ltp}</td>
                     <td style={{ padding: '8px 10px', color: pl >= 0 ? C.buy : C.sell, fontWeight: 500 }}>
-                      {(pl >= 0 ? '+' : '') + '₹' + Math.abs(pl).toLocaleString()}
+                      {(pl >= 0 ? '+' : '') + 'Rs' + Math.abs(pl).toLocaleString()}
                     </td>
                     <td style={{ padding: '8px 10px' }}><Badge type={p.signal} /></td>
                     <td style={{ padding: '8px 10px', fontSize: 12 }}>
-                      {flag && flag.type === 'MISS' && (
-                        <div style={{ color: '#d94040', fontWeight: 500, marginBottom: 3 }}>{'🚨 Guidance miss: ' + flag.msg}</div>
-                      )}
+                      {flag && flag.type === 'MISS' && <div style={{ color: '#d94040', fontWeight: 500, marginBottom: 3 }}>{'Guidance miss: ' + flag.msg}</div>}
                       {relNews.map((n, j) => (
-                        <div key={j} style={{ color: '#6b7280', marginBottom: 2 }}>
-                          {'📰 ' + n.headline + ' · ' + n.time + ' ago'}
-                        </div>
+                        <div key={j} style={{ color: '#6b7280', marginBottom: 2 }}>{n.headline + ' · ' + n.time + ' ago'}</div>
                       ))}
                       {!flag && relNews.length === 0 && <span style={{ color: '#9ca3af' }}>No alerts</span>}
                     </td>
@@ -657,15 +754,14 @@ export function Portfolio({ onSearch }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <CardTitle icon="✦">Portfolio AI analysis</CardTitle>
           <button onClick={getInsight} disabled={portLoading} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '0.5px solid #1a6fc4', background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer', fontWeight: 500 }}>
-            {portLoading ? 'Analyzing…' : 'Get AI analysis ↗'}
+            {portLoading ? 'Analyzing...' : 'Get AI analysis'}
           </button>
         </div>
-        {portLoading && <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>Analyzing your portfolio against live market data…</div>}
-        {portInsight ? (
-          <div style={{ fontSize: 13, color: '#1f2937', lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: portInsight.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }} />
-        ) : !portLoading && (
-          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>Click "Get AI analysis" above for a full cross-referenced read on your holdings.</div>
-        )}
+        {portLoading && <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>Analyzing your portfolio against live market data...</div>}
+        {portInsight
+          ? <div style={{ fontSize: 13, color: '#1f2937', lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: portInsight.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }} />
+          : !portLoading && <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>Click "Get AI analysis" for a full cross-referenced read on your holdings.</div>
+        }
       </Card>
     </div>
   );
