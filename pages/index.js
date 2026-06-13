@@ -31,7 +31,7 @@ export default function Home() {
       case 'earnings': return <Earnings />;
       case 'global': return <Global />;
       case 'midcap': return <MidcapGems onSearch={doSearch} />;
-      case 'portfolio': return <Portfolio />;
+      case 'portfolio': return <Portfolio onSearch={doSearch} />;
       case 'news': return <NewsTab onSearch={doSearch} />;
       default: return <Overview onSearch={doSearch} />;
     }

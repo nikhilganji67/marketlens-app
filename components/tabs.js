@@ -454,8 +454,6 @@ function parseZerodhaCSV(text) {
   const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
   const header = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-
-  // Map common Zerodha column names
   const col = (row, ...names) => {
     for (const name of names) {
       const idx = header.findIndex(h => h.includes(name));
@@ -463,26 +461,45 @@ function parseZerodhaCSV(text) {
     }
     return '';
   };
-
   return lines.slice(1).map(line => {
     const row = line.split(',');
     const stock = col(row, 'instrument', 'symbol', 'stock', 'tradingsymbol');
     const qty = parseFloat(col(row, 'quantity', 'qty')) || 0;
     const avg = parseFloat(col(row, 'avg', 'average')) || 0;
     const ltp = parseFloat(col(row, 'ltp', 'last price', 'current')) || avg;
-    const pnl = parseFloat(col(row, 'p&l', 'pnl', 'unrealised')) || (ltp - avg) * qty;
     if (!stock || qty === 0) return null;
-    return { stock, qty, avg: Math.round(avg * 100) / 100, ltp: Math.round(ltp * 100) / 100, pnl: Math.round(pnl), signal: 'HOLD', alert: 'Upload complete — AI analysis pending.' };
+    return { stock, qty, avg: Math.round(avg * 100) / 100, ltp: Math.round(ltp * 100) / 100, signal: 'HOLD' };
   }).filter(Boolean);
 }
 
-export function Portfolio() {
-  const [holdings, setHoldings] = useState(null); // null = show demo
+function getStockNews(stock, newsList) {
+  return newsList.filter(n => n.stocks.some(s => s.toUpperCase() === stock.toUpperCase()));
+}
+
+function getStockFlag(stock, newsList, earnings) {
+  const earning = earnings.find(e => e.co.toUpperCase().includes(stock.toUpperCase()));
+  if (earning?.signal === 'MISS') return { type: 'MISS', msg: earning.guidance };
+  const relNews = getStockNews(stock, newsList);
+  if (relNews.length > 0) return { type: 'NEWS', msg: relNews[0].headline };
+  return null;
+}
+
+export function Portfolio({ onSearch }) {
+  const [holdings, setHoldings] = useState(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('ml_holdings') : null;
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const [savedFileName, setSavedFileName] = useState(() => {
+    try {
+      return typeof window !== 'undefined' ? localStorage.getItem('ml_holdings_name') || '' : '';
+    } catch { return ''; }
+  });
   const [portInsight, setPortInsight] = useState('');
   const [portLoading, setPortLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploadError, setUploadError] = useState('');
-  const [fileName, setFileName] = useState('');
 
   const data = holdings || PORTFOLIO;
   const total = data.reduce((a, p) => a + p.qty * p.ltp, 0);
@@ -495,7 +512,6 @@ export function Portfolio() {
       setUploadError('Please upload a .csv file from Zerodha Console.');
       return;
     }
-    setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
       const parsed = parseZerodhaCSV(e.target.result);
@@ -504,10 +520,24 @@ export function Portfolio() {
         return;
       }
       setHoldings(parsed);
-      localStorage.setItem('ml_holdings', JSON.stringify(parsed));
+      setSavedFileName(file.name);
       setPortInsight('');
+      try {
+        localStorage.setItem('ml_holdings', JSON.stringify(parsed));
+        localStorage.setItem('ml_holdings_name', file.name);
+      } catch {}
     };
     reader.readAsText(file);
+  };
+
+  const clearHoldings = () => {
+    setHoldings(null);
+    setSavedFileName('');
+    setPortInsight('');
+    try {
+      localStorage.removeItem('ml_holdings');
+      localStorage.removeItem('ml_holdings_name');
+    } catch {}
   };
 
   const getInsight = async () => {
@@ -517,7 +547,7 @@ export function Portfolio() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: 'Analyze this Zerodha portfolio and give actionable insights. Cross-reference each holding with: current sector signal, FII flow, earnings result, PE vs sector avg. Which positions to add to, which to exit, and what is missing from my portfolio? Be specific with ₹ targets.',
+          prompt: 'Analyze this Zerodha portfolio and give actionable insights. Cross-reference each holding with: current sector signal, FII flow, earnings result, PE vs sector avg. Which positions to add to, which to exit, and what is missing from my portfolio? Be specific with rupee targets.',
           context: JSON.stringify({ holdings: data, sectors: SECTORS, earnings: EARNINGS, fii: FII_TODAY, news: NEWS }),
         }),
       });
@@ -531,81 +561,53 @@ export function Portfolio() {
 
   return (
     <div>
-      {/* Upload card */}
       <Card style={{ marginBottom: 14 }}>
-        <CardTitle icon="📂">Import Zerodha holdings</CardTitle>
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-          Export from <strong>Zerodha Console</strong> → Portfolio → Holdings → Download CSV, then upload below.
-        </div>
-
-        {/* Drop zone */}
-        <div
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
-          style={{
-            border: `2px dashed ${dragOver ? '#1a6fc4' : '#d1d5db'}`,
-            borderRadius: 10,
-            padding: '24px 16px',
-            textAlign: 'center',
-            background: dragOver ? '#f0f7ff' : '#f9fafb',
-            transition: 'all 0.15s',
-            cursor: 'pointer',
-          }}
-          onClick={() => document.getElementById('csv-input').click()}
-        >
-          <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>
-            {fileName ? `✅ ${fileName} uploaded` : 'Drop your Zerodha CSV here or click to browse'}
-          </div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Supports Zerodha Console holdings export (.csv)</div>
-          <input
-            id="csv-input"
-            type="file"
-            accept=".csv"
-            style={{ display: 'none' }}
-            onChange={e => handleFile(e.target.files[0])}
-          />
-        </div>
-
-        {uploadError && (
-          <div style={{ marginTop: 10, fontSize: 12, color: '#d94040', background: '#fce8e8', padding: '8px 12px', borderRadius: 8 }}>
-            ⚠ {uploadError}
-          </div>
-        )}
-
-        {holdings && (
-          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: '#1a9e5c', fontWeight: 500 }}>✅ {holdings.length} holdings loaded from your CSV</span>
-            <button
-              onClick={() => { setHoldings(null); localStorage.removeItem('ml_holdings'); setFileName(''); setPortInsight(''); }}
-              style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer' }}
-            >
-              Clear · use demo data
+        <CardTitle icon="📂">Zerodha holdings</CardTitle>
+        {holdings ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#e6f7ef', borderRadius: 8 }}>
+            <span style={{ fontSize: 13, color: '#0e6b3d', fontWeight: 500 }}>
+              {'✅ ' + (savedFileName || 'Holdings') + ' · ' + holdings.length + ' stocks loaded · auto-saved'}
+            </span>
+            <button onClick={clearHoldings} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #d1d5db', background: 'white', color: '#6b7280', cursor: 'pointer' }}>
+              Clear
             </button>
           </div>
-        )}
-
-        {!holdings && (
-          <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>
-            Currently showing demo portfolio. Upload your CSV to see real holdings.
+        ) : (
+          <div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+              Export from Zerodha Console &rarr; Portfolio &rarr; Holdings &rarr; Download CSV
+            </div>
+            <div
+              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+              onClick={() => document.getElementById('csv-input').click()}
+              style={{ border: '2px dashed #d1d5db', borderRadius: 10, padding: '20px 16px', textAlign: 'center', background: '#f9fafb', cursor: 'pointer' }}
+            >
+              <div style={{ fontSize: 24, marginBottom: 6 }}>📄</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>Drop your Zerodha CSV here or click to browse</div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>Saved automatically — no re-uploading needed next time</div>
+              <input id="csv-input" type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+            </div>
+            {uploadError && <div style={{ marginTop: 8, fontSize: 12, color: '#d94040', background: '#fce8e8', padding: '8px 12px', borderRadius: 8 }}>{'⚠ ' + uploadError}</div>}
+            <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>Showing demo portfolio. Upload your CSV to see real holdings.</div>
           </div>
         )}
       </Card>
 
       <Row cols={3}>
-        <MetricCard label="Portfolio value" value={`₹${(total / 100000).toFixed(1)}L`} />
-        <MetricCard label="Unrealised P&L" value={`${pnl >= 0 ? '+' : ''}₹${Math.abs(pnl / 1000).toFixed(0)}k`} color={pnl >= 0 ? C.buy : C.sell} />
-        <MetricCard label="Return %" value={`${pnl >= 0 ? '+' : ''}${((pnl / cost) * 100).toFixed(1)}%`} color={pnl >= 0 ? C.buy : C.sell} />
+        <MetricCard label="Portfolio value" value={'₹' + (total / 100000).toFixed(1) + 'L'} />
+        <MetricCard label="Unrealised P&L" value={(pnl >= 0 ? '+' : '') + '₹' + Math.abs(pnl / 1000).toFixed(0) + 'k'} color={pnl >= 0 ? C.buy : C.sell} />
+        <MetricCard label="Return %" value={(pnl >= 0 ? '+' : '') + ((pnl / cost) * 100).toFixed(1) + '%'} color={pnl >= 0 ? C.buy : C.sell} />
       </Row>
 
       <Card>
-        <CardTitle icon="💼">Holdings with live signals</CardTitle>
+        <CardTitle icon="💼">Holdings · news · flags</CardTitle>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: '0.5px solid #e5e7eb' }}>
-                {['Stock', 'Qty', 'Avg cost', 'LTP', 'P&L', 'Signal', 'Note'].map(h => (
+                {['Stock', 'Qty', 'Avg', 'LTP', 'P&L', 'Signal', 'News & flags'].map(h => (
                   <th key={h} style={{ textAlign: 'left', padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#6b7280' }}>{h}</th>
                 ))}
               </tr>
@@ -613,17 +615,36 @@ export function Portfolio() {
             <tbody>
               {data.map((p, i) => {
                 const pl = (p.ltp - p.avg) * p.qty;
+                const flag = getStockFlag(p.stock, NEWS, EARNINGS);
+                const relNews = getStockNews(p.stock, NEWS);
                 return (
-                  <tr key={i} style={{ borderBottom: '0.5px solid #f9fafb' }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 500 }}>{p.stock}</td>
+                  <tr key={i} style={{ borderBottom: '0.5px solid #f9fafb', background: flag && flag.type === 'MISS' ? '#fff9f9' : 'white' }}>
+                    <td style={{ padding: '8px 10px' }}>
+                      <span
+                        onClick={() => onSearch && onSearch(p.stock)}
+                        style={{ fontWeight: 600, color: '#1a6fc4', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        {p.stock}
+                      </span>
+                    </td>
                     <td style={{ padding: '8px 10px' }}>{p.qty}</td>
-                    <td style={{ padding: '8px 10px', color: '#6b7280' }}>₹{p.avg}</td>
-                    <td style={{ padding: '8px 10px' }}>₹{p.ltp}</td>
+                    <td style={{ padding: '8px 10px', color: '#6b7280' }}>{'₹' + p.avg}</td>
+                    <td style={{ padding: '8px 10px' }}>{'₹' + p.ltp}</td>
                     <td style={{ padding: '8px 10px', color: pl >= 0 ? C.buy : C.sell, fontWeight: 500 }}>
-                      {pl >= 0 ? '+' : ''}₹{Math.abs(pl).toLocaleString()}
+                      {(pl >= 0 ? '+' : '') + '₹' + Math.abs(pl).toLocaleString()}
                     </td>
                     <td style={{ padding: '8px 10px' }}><Badge type={p.signal} /></td>
-                    <td style={{ padding: '8px 10px', fontSize: 12, color: '#6b7280' }}>{p.alert}</td>
+                    <td style={{ padding: '8px 10px', fontSize: 12 }}>
+                      {flag && flag.type === 'MISS' && (
+                        <div style={{ color: '#d94040', fontWeight: 500, marginBottom: 3 }}>{'🚨 Guidance miss: ' + flag.msg}</div>
+                      )}
+                      {relNews.map((n, j) => (
+                        <div key={j} style={{ color: '#6b7280', marginBottom: 2 }}>
+                          {'📰 ' + n.headline + ' · ' + n.time + ' ago'}
+                        </div>
+                      ))}
+                      {!flag && relNews.length === 0 && <span style={{ color: '#9ca3af' }}>No alerts</span>}
+                    </td>
                   </tr>
                 );
               })}
@@ -635,29 +656,21 @@ export function Portfolio() {
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <CardTitle icon="✦">Portfolio AI analysis</CardTitle>
-          <button
-            onClick={getInsight}
-            disabled={portLoading}
-            style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '0.5px solid #1a6fc4', background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer', fontWeight: 500 }}
-          >
-            {portLoading ? 'Analyzing…' : 'Refresh analysis ↗'}
+          <button onClick={getInsight} disabled={portLoading} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '0.5px solid #1a6fc4', background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer', fontWeight: 500 }}>
+            {portLoading ? 'Analyzing…' : 'Get AI analysis ↗'}
           </button>
         </div>
         {portLoading && <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>Analyzing your portfolio against live market data…</div>}
         {portInsight ? (
-          <div
-            style={{ fontSize: 13, color: '#1f2937', lineHeight: 1.8 }}
-            dangerouslySetInnerHTML={{ __html: portInsight.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }}
-          />
+          <div style={{ fontSize: 13, color: '#1f2937', lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: portInsight.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }} />
         ) : !portLoading && (
-          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
-            Click &quot;Get AI analysis&quot; above to analyze your portfolio.
-          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>Click "Get AI analysis" above for a full cross-referenced read on your holdings.</div>
         )}
       </Card>
     </div>
   );
 }
+
 
 // ── News ──────────────────────────────────────────────────────────────────────
 export function NewsTab({ onSearch }) {
