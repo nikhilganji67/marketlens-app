@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge, Pct, Card, CardTitle, MetricCard, Row, TR, AIInsight, Divider, C } from './ui';
 import { MARKET, SECTORS, FII_TODAY, BULK_DEALS, EARNINGS, MIDCAP, EM_MARKETS, PORTFOLIO, NEWS, DATA_UPDATED } from '../lib/data';
 
@@ -770,42 +770,83 @@ export function Portfolio({ onSearch }) {
 
 // ── News ──────────────────────────────────────────────────────────────────────
 export function NewsTab({ onSearch }) {
+  const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [cachedAt, setCachedAt] = useState(null);
+  const [filter, setFilter] = useState('all');
+
+  const fetchNews = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/news');
+      const d = await res.json();
+      setNews(d.news || []);
+      setCachedAt(d.cachedAt);
+    } catch {
+      setNews([{ headline: 'Could not load live news. Check connection.', source: 'System', time: 'now', stocks: [] }]);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchNews(); }, []);
+
+  const filtered = filter === 'all' ? news : news.filter(n => n.stocks.length > 0);
+
   return (
     <div>
       <Card>
-        <CardTitle icon="📰">Live market news feed</CardTitle>
-        {NEWS.map((n, i) => (
-          <div key={i} style={{ padding: '8px 0', borderBottom: '0.5px solid #f3f4f6' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: n.stocks.length ? 6 : 0 }}>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>{n.headline}</span>
-              <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>{n.time} ago</span>
-            </div>
-            {n.stocks.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {n.stocks.map(s => (
-                  <span
-                    key={s}
-                    onClick={() => onSearch(s)}
-                    style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer', fontWeight: 500 }}
-                  >
-                    {s}
-                  </span>
-                ))}
-              </div>
-            )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <CardTitle icon="📰">Live market news · scraped every hour</CardTitle>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {cachedAt && <span style={{ fontSize: 11, color: '#9ca3af' }}>{'Updated: ' + new Date(cachedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+            <button onClick={fetchNews} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '0.5px solid #1a6fc4', background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer' }}>
+              Refresh
+            </button>
           </div>
-        ))}
-        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
-          Click any stock ticker to get full AI analysis · Sources: NSE, BSE, Economic Times, MoneyControl, Mint
         </div>
-      </Card>
-      <Card>
-        <CardTitle icon="✦">AI news synthesis</CardTitle>
-        <AIInsight
-          prompt="Synthesize today's market news and extract the most actionable signals for an equity investor. What are the key macro themes? Which stock/sector-specific news is most impactful? Any news that contradicts current consensus? What should I be watching in the next 48 hours?"
-          context={NEWS}
-          title="news digest"
-        />
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {[{ key: 'all', label: 'All news' }, { key: 'stocks', label: 'Stock-specific only' }].map(f => (
+            <button key={f.key} onClick={() => setFilter(f.key)} style={{ fontSize: 12, padding: '4px 12px', borderRadius: 99, border: '0.5px solid ' + (filter === f.key ? '#1a6fc4' : '#d1d5db'), background: filter === f.key ? '#e8f1fc' : 'white', color: filter === f.key ? '#1a6fc4' : '#6b7280', cursor: 'pointer' }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: '#6b7280' }}>
+            Fetching live news from Economic Times, MoneyControl, Mint, Business Standard, NSE...
+          </div>
+        ) : (
+          filtered.map((n, i) => (
+            <div key={i} style={{ padding: '9px 0', borderBottom: '0.5px solid #f3f4f6' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: n.stocks && n.stocks.length ? 5 : 0 }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{n.headline}</span>
+                  {n.link && (
+                    <a href={n.link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#1a6fc4', marginLeft: 8, textDecoration: 'none' }}>Read</a>
+                  )}
+                  <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 8 }}>{n.source}</span>
+                </div>
+                <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>{n.time} ago</span>
+              </div>
+              {n.stocks && n.stocks.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                  {n.stocks.map(s => (
+                    <span key={s} onClick={() => onSearch(s)}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: '#e8f1fc', color: '#1a6fc4', cursor: 'pointer', fontWeight: 500 }}>
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+
+        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
+          Sources: Economic Times, MoneyControl, Mint, Business Standard, NDTV Profit, NSE Filings · Cached 1hr · Click any stock for AI analysis
+        </div>
       </Card>
     </div>
   );
